@@ -1,0 +1,321 @@
+---
+title: "IMT 572 - Final Project: can we predict how effective production is for rice farms?"
+author: "Brya Patterson"
+date: "2024-05-08"
+output: pdf_document
+---
+# Rice Farms in Indonesia
+The dataset selected for this analysis is from the plm package in R. RiceFarms is a dataset with 1026 rows representing data on rice farms in Indonesia. A single row represents a farm and a series of data points about that farm. There is more than one row for the same farm as there may be more then one rice field with different datapoints (like yield, or variety of rice). 
+
+I selected this dataset because of the clarity of its variables, the size of the dataset is not too large, and I like rice - it's my favorite food. There are 20 variables, 4 categorical and 16 numerical. The varaibles in the dataset are as follows:
+
+* Numerical:
+  + id: the farm identifier
+  + size: total area cultivated with rice, measured in hectares
+  + bimas: bIMAS is an intensification program; one of 'no' (non-bimas farmer), 'yes' (bimas farmer) or 'mixed' (part but not all of farmer's land was registered to be in the bimas program)
+  + seed: seed in kilogram
+  + urea: urea in kilogram
+  + phosphate: phosphate in kilogram
+  + pesticide: pesticide cost in Rupiah
+  + pseed: price of seed in Rupiah per kg
+  + purea: price of urea in Rupiah per kg
+  + pphosph: price of phosphate in Rupiah per kg
+  + hiredlabor: hired labor in hours
+  + famlabor: family labor in hours
+  + totlabor: total labor (excluding harvest labor)
+  + wage: labor wage in Rupiah per hour
+  + goutput: gross output of rice in kg
+  + noutput: net output, gross output minus harvesting cost (paid in terms of rice)
+  + price: price of rough rice in Rupiah per kg
+
+
+* Categorical:
+  + status: land status - 'owner' (non sharecroppers, owner operators or leaseholders or both), 'share' (sharecroppers), 'mixed' (mixed of the two previous status)
+  + varieties: 'trad' (traditional varieties), 'high' (high yielding varieties) and 'mixed' (mixed varieties)
+  + region: one of 'wargabinangun', 'langan', 'gunungwangi', 'malausma', 'sukaambit', 'ciwangi'
+
+Numerical variables represent values like price or costs associated with the farm, weight in kg of yield or fertilizer. Categorical variables are the status of the farm (if it is owned by a sharecropper, mixed or is fully owned by an individual), varieties of grain, and the region the farm is located in.
+
+# Questions for Exploration
+I would like to explore the following questions:
+
+1. Does the size of the farm dictate the gross output of a specific variety's harvest?
+2. What impact does urea and phosphate have on gross output by variety?
+3. I'd also like to understand if the use of fertilizers produce a better yield for a specific region, regardless of variety.
+
+I am interested in seeing what the relationship between yield, farm size and variety is, and what impact the addition of fertilizers have on the yield of a rice harvest. To keep the scope narrowed and focused on my research questions, I have excluded most of the variables, focusing only on goutput (gross output in kg), size (in hectares), varieties (traditional, high yield, and mixed), urea (in kg), phosphate (in kg), as well as price (price of yield in Rupiah per kg) and region.
+
+# Methodology and Approach
+For question one, I can use descriptive statistics to compare the distribution of gross output for each variety. I will also use an analysis of variance (ANOVA) test to determine if there are significant differences in gross output among different rice varieties.
+
+For question two, I can use visualizations to show the relationship between each fertilizer and gross output for each variety. This will allow for the assessment of the impact of each fertilizer on gross output of the variety.
+
+For question three, I will use k-means clustering to segment the regions based on their rice output. Clustering will allow for identification of patterns and group farms with similar characteristics by region. This can help me to understand if certain regions produce better yields regardless of variety.
+
+I will segment the data by rice variety and region to analyze each combination separately. I will then use multiple linear regression to build predictive models for each combination of rice variety and region. It will include urea and phosphate as predictor variables and gross output as the outcome variable. 
+
+# Data Preparation
+Load in the relevant libraries and the data.
+```{r message=FALSE}
+library(tidyverse)
+library(plm)
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+data("RiceFarms")
+riceFarms_data <- as_tibble(RiceFarms)
+
+```
+
+# Question 1: 
+## Does the size of the farm dictate the gross output of a specific variety's harvest?
+### Prepare the data
+Here, I select only for the variables necessary to answer the research question: goutput, size, region, urea, phosphate, price, and varieties.
+
+```{r}
+#select columns in scope
+riceFarms_data <- riceFarms_data %>% 
+  select(goutput, size, region, urea, phosphate, price, varieties)
+
+```
+
+Next, I want to compare the Summary Statistics for each variable to understand the gross output for each variety, helping to understand central tendencies and variability.
+```{r}
+summary_stats <- riceFarms_data %>%
+  group_by(varieties) %>%
+  summarise(
+    count = n(),
+    mean_goutput = mean(goutput, na.rm = TRUE),
+    median_goutput = median(goutput, na.rm = TRUE),
+    sd_goutput = sd(goutput, na.rm = TRUE),
+    min_goutput = min(goutput, na.rm = TRUE),
+    max_goutput = max(goutput, na.rm = TRUE)
+  )
+
+# Print the summary statistics
+print(summary_stats)
+```
+### ANOVA (Analysis of Variance) test
+An ANOVA test will help to determine if there are statistically significant differences in the gross output among the different rice varieties. This is essential for understanding if variety impacts yield beyond random variation and chance.
+
+```{r}
+# Perform ANOVA for each variety and print results
+uniqueRice_varieties <- unique(RiceFarms$varieties)
+for (variety in uniqueRice_varieties) {
+  cat("Variety:", variety, "\n")
+  variety_data <- subset(riceFarms_data, varieties == variety)
+  anova_result <- aov(goutput ~ size, data = variety_data) #see ??aov
+  print(summary(anova_result))
+  cat("\n")
+}
+
+```
+### Results:
+Each variety returns a very low p-value of < 2e-16, and with a significance of 0.001 this suggests that there is a highly significant relationship between farm size and gross output for each given variety of rice. This means that each variety's gross output is significantly affected by the size of the farm.
+# Question 2: 
+## What impact does size, urea and phosphate have on gross output by variety?
+### Prepare the data
+Here, I filter for each variety of rice, and produce a visualization that represents the variables of size, urea, and phosphate. 
+
+**Traditional rice variety:**
+
+```{r, echo=FALSE,results='hide',message=FALSE, out.width="75%"}
+rice_trad <- riceFarms_data %>% 
+  filter(varieties == 'trad')
+
+
+# Scatter plot for urea vs gross output
+scatter_plot_ureaT <- ggplot(rice_trad, aes(x = urea, y = goutput)) +
+  geom_point() +
+  labs(title = paste("Urea for:", rice_trad$varieties),
+       x = "Urea",
+       y = "Gross Output") +
+  #geom_smooth(method = 'lm')
+  theme(
+    plot.title = element_text(size = 9),
+    axis.title.x = element_text(size = 9),
+    axis.title.y = element_text(size = 9),
+  )
+
+# Scatter plot for phosphate vs gross output
+scatter_plot_phosphateT <- ggplot(rice_trad, aes(x = phosphate, y = goutput)) +
+  geom_point() +
+  labs(title = paste("Phosphate for:", rice_trad$varieties),
+       x = "Phosphate",
+       y = "Gross Output") +
+  #geom_smooth(method = 'lm')
+  theme(
+    plot.title = element_text(size = 9),
+    axis.title.x = element_text(size = 9),
+    axis.title.y = element_text(size = 9),
+  )
+combined_plotsT <- grid.arrange(scatter_plot_ureaT, 
+                                scatter_plot_phosphateT, ncol = 2)
+```
+
+**High yield rice variety:**
+
+```{r, echo=FALSE,results='hide',message=FALSE, out.width="75%"}
+rice_high <- riceFarms_data %>% 
+  filter(varieties == 'high')
+
+
+# Scatter plot for urea vs gross output
+scatter_plot_ureaH <- ggplot(rice_high, aes(x = urea, y = goutput)) +
+  geom_point() +
+  labs(title = paste("Urea for:", rice_high$varieties),
+       x = "Urea",
+       y = "Gross Output") +
+  #geom_smooth(method = 'lm')
+  theme(
+    plot.title = element_text(size = 9),
+    axis.title.x = element_text(size = 9),
+    axis.title.y = element_text(size = 9),
+  )
+
+# Scatter plot for phosphate vs gross output
+scatter_plot_phosphateH <- ggplot(rice_high, aes(x = phosphate, y = goutput)) +
+  geom_point() +
+  labs(title = paste("Phosphate for:", rice_high$varieties),
+       x = "Phosphate",
+       y = "Gross Output") +
+  #geom_smooth(method = 'lm')
+  theme(
+    plot.title = element_text(size = 9),
+    axis.title.x = element_text(size = 9),
+    axis.title.y = element_text(size = 9),
+  )
+combined_plotsH <- grid.arrange(scatter_plot_ureaH, 
+                                scatter_plot_phosphateH, ncol = 2)
+```
+
+**Mixed rice variety:**
+
+```{r, echo=FALSE,results='hide',message=FALSE, out.width="75%"}
+rice_mixed <- riceFarms_data %>% 
+  filter(varieties == 'mixed')
+
+
+# Scatter plot for urea vs gross output
+scatter_plot_ureaM <- ggplot(rice_mixed, aes(x = urea, y = goutput)) +
+  geom_point() +
+  labs(title = paste("Urea for:", rice_mixed$varieties),
+       x = "Urea",
+       y = "Gross Output") +
+  #geom_smooth(method = 'lm')
+  theme(
+    plot.title = element_text(size = 9),
+    axis.title.x = element_text(size = 9),
+    axis.title.y = element_text(size = 9),
+  )
+
+# Scatter plot for phosphate vs gross output
+scatter_plot_phosphateM <- ggplot(rice_mixed, aes(x = phosphate, y = goutput)) +
+  geom_point() +
+  labs(title = paste("Phosphate for:", rice_mixed$varieties),
+       x = "Phosphate",
+       y = "Gross Output") +
+  #geom_smooth(method = 'lm')
+  theme(
+    plot.title = element_text(size = 9),
+    axis.title.x = element_text(size = 9),
+    axis.title.y = element_text(size = 9),
+  )
+combined_plotsM <- grid.arrange(scatter_plot_ureaM, 
+                                scatter_plot_phosphateM, ncol = 2)
+
+```
+
+# Question 3:
+## Does the use of fertilizers produce a better yield for a specific region, regardless of variety?
+### Prepare the data
+First I select for the relevant variables: size, urea, and phosphate. Given the knowledge of the three distinct varieties of rice commonly grown in the regions, I have chosen k = 3 to run the k-means algorithm.
+
+```{r}
+rice_kmeans <- riceFarms_data %>% select(goutput, size, urea, phosphate, price)
+
+set.seed(1)
+rice_k3 <- kmeans(rice_kmeans, centers = 3)
+rice_regions <- riceFarms_data %>% 
+  mutate(k3_cluster = as_factor(rice_k3$cluster))
+```
+
+Now, I'll plot this data to show phosphate by region and urea by region.
+
+```{r, echo=FALSE,results='hide',message=FALSE}
+
+#phosephate
+ggplot(rice_regions, aes(x = goutput, y = phosphate)) +
+  geom_point(aes(color = region, shape = k3_cluster))+
+  geom_smooth(method = 'lm')+
+  labs(title = paste("Phosphate use by Region"),
+       x = "Phosphate",
+       y = "Gross Output")
+
+#urea
+ggplot(rice_regions, aes(x = goutput, y = urea)) +
+  geom_point(aes(color = region, shape = k3_cluster))+
+  geom_smooth(method = 'lm')+
+  labs(title = paste("Urea use by Region"),
+       x = "Urea",
+       y = "Gross Output")
+```
+
+# Results
+
+## Question 1: Does the size of the farm dictate the gross output of a specific variety's harvest?
+```{r}
+print(summary_stats)
+```
+Descriptive statistics shows that while traditional rice varieties had more observations in the dataset, they presented the lowest average and median yield. The high yield variety produces the greatest yield on average, but the median yield is less than that of the mixed variety. This tells us that we can expect the high and mixed yields to have a higher gross output than traditional, regardless of size. What is not clear from these results is whether or not fertilizers or climate conditions impacted the growth of these crops.
+
+ANOVA test were used to determine the significance of the relationship between farm size and gross output for each given variety of rice. Each variety returned a very low p-value, less than 0.001 suggesting that each variety's gross output is significantly affected by the size of the farm.
+
+The visualization below shows the relationship between size of the farm and the variety of rice. This confirms that traditional varieties typically produce lower yields as most of the recorded farms are less than 2 hectares. Similarly, mixed yields are most often cultivated on smaller farms, but in cases where the size fo the farm is larger than 2 hectares, they produce yields similar to high yield varieties. High yield varieties show greater yields when the farm size is greater than 2 hectares, but there a some farms showing greater yields on farms between 1 and 2 hectares. 
+
+This shows that the best farm size to use for any variety is between 1 and 2 hectares. But for mixed and high yield varieties, a larger farm would produce greater gross output.
+```{r}
+#plot shows correlation between farm size, variety and gross output
+ggplot(data = riceFarms_data, aes(x = size, y = goutput)) +
+  geom_point(aes(color = varieties)) +
+  labs(title = 'Gross Output by Farm Size and Rice Variety',
+       x = 'Size (hectares)',
+       y = 'Gross Output (kilograms)')
+
+#analysis of variance (anova) test
+uniqueRice_varieties <- unique(riceFarms_data$varieties)
+```
+## Question 2: What impact does urea and phosphate have on gross output by variety?
+To understand what impact the size of the farm and fertilizer use have on the gross output of each variety, I used a visualizations to show the relationship between size, urea, phosphate and gross output for each variety.
+
+For the traditional variety, it is known that the size of the farms are typically less than 2 hectares, resulting in lower outputs than mixed and high yield varieties. In general, the plots for traditional and high yield varieties show a return of greater yield when phosphate and urea is used regardless of farm size, with the high yield variety producing a greater gross output of rice than the traditional variety. It also shows that less phosphate results in better yields for these varieties.
+
+In contrast, the mixed variety shows greater variation in the use of fertilizers. While use of urea leads to a greater gross output, especially in cases where more urea is used, use of phosphate does not produce greater yields. This could mean that the mixed variety of rice does not respond well to phosphate as a fertilizer. 
+
+Overall, urea seems to have the greatest positive impact on gross output of rice regardless of farm size and variety. However, additional considerations for phosphate use should be made since it is also not known what the existing soil composition is or what the climate is at the time the observations were made.
+
+## Question 3: Does the use of fertilizers produce a better yield for a specific region, regardless of variety?
+While it is not know what the existing soil composition is or what the climate is at the time the observations were made, there may be a way to understand the conditions by looking at fertilizer use by region. To do this, I used a k-means clustering to segment the regions based on their rice output. This has allowed for the identification of patterns and similar characteristics by region.
+
+Question 2 showed that phosphate use may not have as strong of an impact on gross output for all varieties, least of all for mixed varieties. This holds true for gross output by region. Higher urea use appears to be associated with higher outputs. Overall though, the cluster analysis does not produce a significant patter or results that would show a different relationship than what has already been discussed. Some patterns that can be discerned are:
+
+* The Langan region shows more liberal use of phosphate and urea, but this does not always translate to higher yield.
+* Wargabinangun region also shows high use of fertilizers, and greater gross outputs for rice yields.
+* All six regions have similar gross outputs where urea < 5000 and phosphate < 5000.
+
+# Implications and Weaknesses
+## Implications
+Overall, the analysis of the variables in this report show that farmers should consider the size of their farms when planning their rice cultivation strategies, as it can significantly impact the overall yield, particularly for different varieties of rice. High yield variety seems to produce the best yields on average and the best yields by farm size. Farmers should also consider prioritizing the use of urea over phosphate since phosphate seems to consistently return lower yields.
+
+There may be additional ethical implications such as the environmental impact of fertilizer usage, equitable distribution of resources, and socioeconomic implications for farmers that may impact their ability to access urea or larger farms.
+
+## Weaknesses
+There may be other factors besides farm size, urea, and phosphate usage that influence gross output or yield. Failure to account for these other variables can lead to biased results. For example, climate conditions, soil quality, farming practices, and pest control methods could all affect yield but may not be included in the analysis.
+
+Additionally, while regression analysis can identify patterns between variables, it cannot establish causation. Correlation between farm size, fertilizer usage, and gross output does not necessarily imply causation. Drawing causal conclusions requires additional evidence from other studies or experiments.
+
+
+
+
+
+
